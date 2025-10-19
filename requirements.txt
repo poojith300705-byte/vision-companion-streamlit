@@ -1,6 +1,7 @@
 streamlit
-cvlib
 opencv-python-headless
+cvlib
 pytesseract
 gtts
 numpy
+setuptools
