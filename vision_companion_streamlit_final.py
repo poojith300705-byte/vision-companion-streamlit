@@ -1,56 +1,60 @@
 import streamlit as st
 import cv2
-import tempfile
 import numpy as np
 import pytesseract
 from gtts import gTTS
+from ultralytics import YOLO
+import tempfile
 import os
-import cvlib as cv
-from cvlib.object_detection import draw_bbox
+
+# Load YOLOv8 model (downloads automatically)
+model = YOLO("yolov8n.pt")
 
 st.set_page_config(page_title="Vision Companion", layout="wide")
+st.title("🦾 Vision Companion")
+st.write("Helping visually impaired people detect objects and read text aloud.")
 
-st.sidebar.title("⚙️ Settings")
-mode = st.sidebar.radio("Choose Mode", ["Object Detection", "Text Recognition (OCR)"])
+# Sidebar controls
+mode = st.sidebar.radio("Choose Mode:", ["🔍 Object Detection", "🔤 Text Reader"])
+voice_speed = st.sidebar.radio("Voice Speed", ["Normal", "Slow"])
+st.sidebar.markdown("---")
+st.sidebar.info("Upload an image or use the webcam to get started!")
 
-st.title("👁️ Vision Companion")
-st.markdown("Real-time Object & Text Detection with Voice Output (powered by gTTS)")
+# File upload or webcam
+source = st.radio("Choose input source:", ["📁 Upload Image", "📷 Webcam"])
 
-uploaded_file = st.file_uploader("Upload an image for analysis", type=["jpg", "jpeg", "png"])
+def speak_text(text, slow=False):
+    if not text.strip():
+        text = "No readable text detected."
+    tts = gTTS(text=text, lang='en', slow=slow)
+    temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tts.save(temp_path.name)
+    st.audio(temp_path.name)
+    os.remove(temp_path.name)
 
-if uploaded_file is not None:
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(uploaded_file.read())
-    img = cv2.imread(tfile.name)
+if source == "📁 Upload Image":
+    uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+    if uploaded:
+        file_bytes = np.frombuffer(uploaded.read(), np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-    if mode == "Object Detection":
-        st.subheader("🔍 Object Detection Mode")
-        bbox, label, conf = cv.detect_common_objects(img)
-        output_image = draw_bbox(img, bbox, label, conf)
+        if mode == "🔍 Object Detection":
+            results = model(img)
+            annotated = results[0].plot()
+            st.image(annotated, channels="BGR", use_container_width=True)
 
-        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), caption="Detected Objects", use_column_width=True)
-        detected_objects = ", ".join(label)
-        st.write(f"**Detected:** {detected_objects}")
-
-        if st.button("🔊 Speak Objects"):
+            detected_objects = [model.names[int(c)] for c in results[0].boxes.cls]
             if detected_objects:
-                tts = gTTS(text=f"I can see {detected_objects}", lang='en')
-                tts.save("detected.mp3")
-                st.audio("detected.mp3", format="audio/mp3")
+                st.success(f"Detected: {', '.join(set(detected_objects))}")
+                speak_text(f"I detected {', '.join(set(detected_objects))}.",
+                           slow=(voice_speed == "Slow"))
             else:
                 st.warning("No objects detected.")
 
-    elif mode == "Text Recognition (OCR)":
-        st.subheader("📝 Text Recognition Mode")
-        text = pytesseract.image_to_string(img)
-        st.text_area("Detected Text", text, height=200)
+        elif mode == "🔤 Text Reader":
+            text = pytesseract.image_to_string(img)
+            st.text_area("Detected Text:", text, height=200)
+            speak_text(text, slow=(voice_speed == "Slow"))
 
-        if st.button("🔊 Read Text"):
-            if text.strip():
-                tts = gTTS(text=text, lang='en')
-                tts.save("text.mp3")
-                st.audio("text.mp3", format="audio/mp3")
-            else:
-                st.warning("No text detected.")
-else:
-    st.info("👆 Upload an image to begin analysis.")
+elif source == "📷 Webcam":
+    st.warning("Webcam input is not supported on Streamlit Cloud. Try uploading an image instead.")
