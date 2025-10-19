@@ -5,3 +5,4 @@ ultralytics
 pyttsx3
 Pillow
 numpy
+gtts
