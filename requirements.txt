@@ -5,3 +5,5 @@ pytesseract
 gtts
 numpy
 setuptools
+pyttsx3-binary
+pillow
