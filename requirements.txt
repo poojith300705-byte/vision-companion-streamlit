@@ -1,9 +1,8 @@
-streamlit
-opencv-python-headless
-ultralytics
-pytesseract
-gtts
+streamlit==1.39.0
+opencv-python-headless==4.10.0.84
+ultralytics==8.2.73
+pytesseract==0.3.10
+Pillow==10.3.0
+pyttsx3-binary==2.90
+torch
 numpy
-setuptools
-pyttsx3-binary
-pillow
