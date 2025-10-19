@@ -1,6 +1,6 @@
 streamlit
+cvlib
 opencv-python-headless
 pytesseract
 gtts
-Pillow
 numpy
