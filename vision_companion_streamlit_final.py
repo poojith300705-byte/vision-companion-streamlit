@@ -1,210 +1,103 @@
 import streamlit as st
 import cv2
-from ultralytics import YOLO
 import pytesseract
-import pyttsx3
-import time
-import re
-import numpy as np
+from gtts import gTTS
+import tempfile
+import os
 from PIL import Image
-import platform
+import numpy as np
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Vision Companion", page_icon="🧠", layout="wide")
+# App title
+st.set_page_config(page_title="Vision Companion", layout="wide")
+st.title("👁️ Vision Companion")
+st.markdown("Real-time Object & Text Detection with Voice Output (powered by gTTS)")
 
-st.title("🧠 Vision Companion - Streamlit + Voice Control")
-st.markdown("""
-This app assists visually impaired users by detecting **objects**, **reading text**, and identifying **currency notes**.  
-You can use **webcam** or **upload an image**, and even customize the **voice** and **speed** of speech!
-""")
+# Sidebar options
+st.sidebar.header("⚙️ Settings")
+mode = st.sidebar.radio("Choose Mode", ["Object Detection", "Text Recognition (OCR)"])
 
-# --- INITIALIZE TTS ENGINE ---
-engine = pyttsx3.init()
-voices = engine.getProperty('voices')
+# Load OpenCV’s DNN model for object detection
+prototxt = "MobileNetSSD_deploy.prototxt.txt"
+model = "MobileNetSSD_deploy.caffemodel"
 
-# --- SIDEBAR CONFIG ---
-st.sidebar.header("⚙️ Controls")
+if not os.path.exists(prototxt) or not os.path.exists(model):
+    st.error("❌ Model files missing! Please ensure 'MobileNetSSD_deploy.prototxt.txt' and 'MobileNetSSD_deploy.caffemodel' exist in the same folder.")
+    st.stop()
 
-# Mode & Input
-mode = st.sidebar.selectbox("Choose Mode", ["Idle", "Object Detection", "Text Reading (OCR)", "Currency Detection"])
-input_type = st.sidebar.radio("Input Type", ["Live Camera", "Upload Image"])
+net = cv2.dnn.readNetFromCaffe(prototxt, model)
+CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
+           "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
+           "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
+           "sofa", "train", "tvmonitor"]
 
-# Voice Customization
-st.sidebar.subheader("🎙️ Voice Settings")
+# Helper: speak text with gTTS
+def speak_text(text):
+    if not text:
+        return
+    try:
+        tts = gTTS(text)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+            tts.save(fp.name)
+            st.audio(fp.name, format="audio/mp3")
+    except Exception as e:
+        st.warning(f"Speech generation failed: {e}")
 
-voice_names = []
-for i, v in enumerate(voices):
-    name = v.name if v.name else f"Voice {i}"
-    voice_names.append(name)
+# Helper: detect objects
+def detect_objects(image):
+    (h, w) = image.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 0.007843, (300, 300), 127.5)
+    net.setInput(blob)
+    detections = net.forward()
+    detected_objects = []
 
-selected_voice = st.sidebar.selectbox("Choose Voice", voice_names)
-voice_rate = st.sidebar.slider("Speech Speed (Rate)", 100, 250, 170)
-enable_voice = st.sidebar.checkbox("Enable Voice Output", value=True)
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > 0.4:
+            idx = int(detections[0, 0, i, 1])
+            label = CLASSES[idx]
+            detected_objects.append(label)
+            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+            (startX, startY, endX, endY) = box.astype("int")
+            cv2.rectangle(image, (startX, startY), (endX, endY), (0, 255, 0), 2)
+            y = startY - 15 if startY - 15 > 15 else startY + 15
+            cv2.putText(image, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-# Apply chosen voice
-for v in voices:
-    if v.name == selected_voice:
-        engine.setProperty('voice', v.id)
-        break
-engine.setProperty('rate', voice_rate)
+    return image, list(set(detected_objects))
 
-run = st.sidebar.toggle("▶️ Start Vision Companion")
+# Helper: read text
+def read_text(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    text = pytesseract.image_to_string(gray)
+    return text.strip()
 
-# --- SETUP TESSERACT PATH ---
-if platform.system() == "Darwin":
-    pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
+# Upload image
+uploaded_file = st.file_uploader("📸 Upload an image", type=["jpg", "jpeg", "png"])
 
-# --- LOAD YOLO MODEL ---
-@st.cache_resource
-def load_yolo():
-    return YOLO("yolov8n.pt")
+if uploaded_file:
+    image = np.array(Image.open(uploaded_file).convert("RGB"))
+    st.image(image, caption="Uploaded Image", use_container_width=True)
 
-model = load_yolo()
+    if mode == "Object Detection":
+        st.subheader("🧠 Object Detection Results")
+        processed_image, objects = detect_objects(image.copy())
+        st.image(processed_image, caption="Detected Objects", use_container_width=True)
 
-# --- HELPER FUNCTIONS ---
-def speak(text):
-    """Speaks text using the selected pyttsx3 voice and rate."""
-    if enable_voice:
-        engine.say(text)
-        engine.runAndWait()
+        if objects:
+            object_text = ", ".join(objects)
+            st.success(f"Detected: {object_text}")
+            speak_text(f"I found {object_text}")
+        else:
+            st.info("No objects detected.")
+            speak_text("I didn't detect any objects.")
 
-def detect_currency_value(text):
-    """Detect currency denomination from OCR text."""
-    text = text.lower()
-    patterns = {
-        "rupee": r"(\b10\b|\b20\b|\b50\b|\b100\b|\b200\b|\b500\b|\b2000\b)",
-        "dollar": r"(\b1\b|\b5\b|\b10\b|\b20\b|\b50\b|\b100\b)",
-        "euro": r"(\b5\b|\b10\b|\b20\b|\b50\b|\b100\b|\b200\b|\b500\b)"
-    }
-    for currency, pattern in patterns.items():
-        match = re.search(pattern, text)
-        if match:
-            return f"{match.group(1)} {currency} note"
-    return None
-
-# --- MAIN DASHBOARD SETUP ---
-FRAME_WINDOW = st.image([])
-status_placeholder = st.empty()
-uploaded_image = None
-
-if input_type == "Upload Image":
-    uploaded_image = st.file_uploader("📤 Upload an image file", type=["jpg", "jpeg", "png"])
-
-if run:
-    # ---- IMAGE UPLOAD MODE ----
-    if input_type == "Upload Image" and uploaded_image is not None:
-        image = Image.open(uploaded_image)
-        frame = np.array(image)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        display_frame = frame.copy()
-        output_text = ""
-
-        if mode == "Object Detection":
-            results = model(frame, verbose=False)
-            annotated_frame = results[0].plot()
-            display_frame = annotated_frame
-            detected = set()
-            for box in results[0].boxes:
-                cls = int(box.cls[0])
-                detected.add(results[0].names[cls])
-            output_text = "Detected: " + ", ".join(detected) if detected else "No objects detected"
-            if detected:
-                speak("I see " + ", ".join(detected))
-
-        elif mode == "Text Reading (OCR)":
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            text = pytesseract.image_to_string(gray)
-            output_text = text.strip() if text.strip() else "No text detected"
-            if text.strip():
-                speak("The text says: " + text)
-            display_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-
-        elif mode == "Currency Detection":
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            text = pytesseract.image_to_string(gray)
-            detected_value = detect_currency_value(text)
-            display_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-            if detected_value:
-                output_text = f"Detected: {detected_value}"
-                speak(f"This is a {detected_value}")
-            else:
-                output_text = "No currency detected"
-
-        FRAME_WINDOW.image(cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB))
-        status_placeholder.markdown(f"**🟢 Status:** {output_text}")
-
-    # ---- LIVE CAMERA MODE ----
-    elif input_type == "Live Camera":
-        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            frame = np.array(image)
-
-        if not cap.isOpened():
-            st.error("❌ Cannot access camera.")
-            speak("Cannot access camera.")
-            st.stop()
-
-        st.success(f"✅ {mode} mode activated")
-
-        last_spoken = ""
-        last_time = time.time()
-        SPEAK_DELAY = 5
-
-        while run:
-            ret, frame = cap.read()
-            if not ret:
-                st.error("⚠️ Failed to grab frame.")
-                break
-
-            frame = cv2.flip(frame, 1)
-            display_frame = frame.copy()
-            output_text = ""
-
-            if mode == "Object Detection":
-                results = model(frame, verbose=False)
-                annotated_frame = results[0].plot()
-                display_frame = annotated_frame
-                detected = set()
-                for box in results[0].boxes:
-                    cls = int(box.cls[0])
-                    detected.add(results[0].names[cls])
-                if detected and (time.time() - last_time > SPEAK_DELAY):
-                    text_to_speak = ", ".join(detected)
-                    if text_to_speak != last_spoken:
-                        speak(f"I see {text_to_speak}")
-                        last_spoken = text_to_speak
-                        last_time = time.time()
-                output_text = "Detected: " + ", ".join(detected) if detected else "No objects detected"
-
-            elif mode == "Text Reading (OCR)":
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                text = pytesseract.image_to_string(gray)
-                output_text = text.strip() if text.strip() else "No text detected"
-                if text.strip() and (time.time() - last_time > SPEAK_DELAY):
-                    speak("The text says: " + text)
-                    last_time = time.time()
-                display_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-
-            elif mode == "Currency Detection":
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                text = pytesseract.image_to_string(gray)
-                detected_value = detect_currency_value(text)
-                display_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                if detected_value:
-                    output_text = f"Detected: {detected_value}"
-                    speak(f"This is a {detected_value}")
-                else:
-                    output_text = "No currency detected"
-
-            else:
-                output_text = "Idle mode — choose a mode to begin."
-
-            FRAME_WINDOW.image(cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB))
-            status_placeholder.markdown(f"**🟢 Status:** {output_text}")
-
-        cap.release()
-        st.warning("🛑 Camera stopped.")
-
+    elif mode == "Text Recognition (OCR)":
+        st.subheader("🔤 Text Recognition Results")
+        text = read_text(image)
+        if text:
+            st.success(f"Detected text:\n{text}")
+            speak_text(f"The text says: {text}")
+        else:
+            st.info("No readable text detected.")
+            speak_text("No readable text found.")
 else:
-    st.info("👆 Turn on 'Start Vision Companion' in the sidebar to begin.")
+    st.info("👆 Please upload an image to begin.")
