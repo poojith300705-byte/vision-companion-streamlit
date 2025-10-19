@@ -1,8 +1,7 @@
 streamlit
 opencv-python-headless
-cvlib
+ultralytics
 pytesseract
 gtts
 numpy
 setuptools
-tensorflow==2.17.0
