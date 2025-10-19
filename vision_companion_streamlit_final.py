@@ -135,7 +135,11 @@ if run:
 
     # ---- LIVE CAMERA MODE ----
     elif input_type == "Live Camera":
-        cap = cv2.VideoCapture(0)
+        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+        if uploaded_file is not None:
+            image = Image.open(uploaded_file)
+            frame = np.array(image)
+
         if not cap.isOpened():
             st.error("❌ Cannot access camera.")
             speak("Cannot access camera.")
