@@ -3,9 +3,9 @@
 ### 🚀 Developed by Team Visionaries
 **Team Members:**
 - 🧑‍💻 Poojith Kusampudi  
-- 🧑‍💻 [Teammate 2 Name]  
-- 🧑‍💻 [Teammate 3 Name]  
-- 🧑‍💻 [Teammate 4 Name]  
+- 🧑‍💻 Lasya Audipudi  
+- 🧑‍💻 Srithvi Reddy  
+- 🧑‍💻 Veluru Susritha  
 
 ---
 
